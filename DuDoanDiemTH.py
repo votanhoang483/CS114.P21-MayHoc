@@ -345,10 +345,23 @@ X_train_split.to_csv("./data/X_train_split.csv", index=False)
 try:
     print("Đang training model...")
     
-    # Import và train LightGBM
-    from lightgbm import LGBMRegressor
     from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+    # from sklearn.linear_model import LinearRegression
+
+    # model = LinearRegression()
+    # model.fit(X_train_split, y_train_split)
     
+    # Import và train Random Forest
+
+    # model = RandomForestRegressor(
+    #     n_estimators=300,
+    #     random_state=42,
+    #     n_jobs=-1
+    # )
+    # model.fit(X_train_split, y_train_split)
+    
+    from lightgbm import LGBMRegressor
     model = LGBMRegressor(
         n_estimators=300, 
         learning_rate=0.01, 
@@ -356,7 +369,6 @@ try:
         verbose=-1,  # Tắt log
         early_stopping_rounds=50 if X_val_split is not None else None
     )
-    
     # Fit với validation set nếu có
     if X_val_split is not None:
         model.fit(

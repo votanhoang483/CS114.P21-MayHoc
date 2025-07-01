@@ -1,10 +1,6 @@
 # Import necessary libraries
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import r2_score
-import json
-from lightgbm import LGBMRegressor
 
 try:
     # Đọc file
@@ -68,88 +64,105 @@ print("\nData types after preprocessing:")
 print(df.dtypes)
 
 # Extract features
+import json
 def extract_verdicts(judgement_str):
     """
-    Trích xuất thông tin verdict từ chuỗi JSON
+    Trích xuất các loại lỗi từ verdicts. Nếu verdicts rỗng => không có lỗi.
     """
     try:
-        # Kiểm tra nếu là NaN hoặc None
         if pd.isna(judgement_str) or judgement_str is None:
+            # Không có verdicts → không có lỗi
             return {
-                'num_verdicts': 0,
+                'has_error': 0,
+                'num_total_errors': 0,
                 'num_wrong': 0,
                 'num_time_limit': 0,
                 'num_memory_limit': 0,
                 'num_runtime_error': 0,
-                'error_ratio': 0
+                'has_compile_error': 0,
+                'has_other_error': 0
             }
-        
-        # Parse JSON string
+
         judgement = json.loads(str(judgement_str))
+        verdicts = judgement.get('verdicts', {})
         
-        # Khởi tạo biến đếm
-        total_verdicts = 0
-        wrong_count = 0
-        time_limit_count = 0
-        memory_limit_count = 0
-        runtime_error_count = 0
+        # Nếu verdicts rỗng hoặc không có lỗi nào
+        if not isinstance(verdicts, dict) or len(verdicts) == 0:
+            return {
+                'has_error': 0,
+                'num_total_errors': 0,
+                'num_wrong': 0,
+                'num_time_limit': 0,
+                'num_memory_limit': 0,
+                'num_runtime_error': 0,
+                'has_compile_error': 0,
+                'has_other_error': 0
+            }
+            
+        # Khởi tạo
+        num_wrong = 0
+        num_tle = 0
+        num_mle = 0
+        num_rte = 0
+        has_compile_error = 0
+        other_errors = 0
         
-        # Get verdicts from the correct structure
-        if isinstance(judgement, dict) and 'verdicts' in judgement:
-            verdicts = judgement['verdicts']
-            if isinstance(verdicts, dict):
-                # Đếm từng loại verdict
-                wrong_count = verdicts.get('WRONG', 0)
-                time_limit_count = verdicts.get('Time Limit Exceeded', 0)
-                memory_limit_count = verdicts.get('Memory Limit Exceeded', 0)
-                runtime_error_count = verdicts.get('Runtime Error', 0)
-                total_verdicts = sum(verdicts.values())
-            elif isinstance(verdicts, list):
-                # Nếu verdicts là list, đếm từng loại
-                for verdict in verdicts:
-                    if verdict == 'WRONG':
-                        wrong_count += 1
-                    elif verdict == 'Time Limit Exceeded':
-                        time_limit_count += 1
-                    elif verdict == 'Memory Limit Exceeded':
-                        memory_limit_count += 1
-                    elif verdict == 'Runtime Error':
-                        runtime_error_count += 1
-                total_verdicts = len(verdicts)
-        
-        # Tính tỉ lệ lỗi
-        error_ratio = (wrong_count + time_limit_count + memory_limit_count + runtime_error_count) / total_verdicts if total_verdicts > 0 else 0
-        
+        for verdict, value in verdicts.items():
+            verdict_lower = verdict.lower().strip()
+
+            # Trường hợp đặc biệt: key rỗng và value là thông báo lỗi → compile error
+            if verdict_lower == "" and isinstance(value, str) and len(value.strip()) > 0:
+                has_compile_error = 1
+                continue
+
+            # Cố gắng ép sang int nếu có thể
+            try:
+                count = int(value)
+                if count < 0: count = 0
+            except:
+                count = 1  # Không ép được → xem là xuất hiện ít nhất 1 lần
+
+            if 'wrong' in verdict_lower:
+                num_wrong += count
+            elif 'time limit' in verdict_lower:
+                num_tle += count
+            elif 'memory limit' in verdict_lower:
+                num_mle += count
+            elif 'runtime error' in verdict_lower:
+                num_rte += count
+            elif 'compile' in verdict_lower:
+                has_compile_error = 1
+            else:
+                other_errors += count
+
+        total_errors = num_wrong + num_tle + num_mle + num_rte + has_compile_error + other_errors
+        has_error = 1 if total_errors > 0 else 0
+
         return {
-            'num_verdicts': total_verdicts,
-            'num_wrong': wrong_count,
-            'num_time_limit': time_limit_count,
-            'num_memory_limit': memory_limit_count,
-            'num_runtime_error': runtime_error_count,
-            'error_ratio': error_ratio
-        }
-        
-    except json.JSONDecodeError as e:
-        print(f"Lỗi JSON: {e}")
-        return {
-            'num_verdicts': 0,
-            'num_wrong': 0,
-            'num_time_limit': 0,
-            'num_memory_limit': 0,
-            'num_runtime_error': 0,
-            'error_ratio': 0
-        }
-    except Exception as e:
-        print(f"Lỗi không xác định: {e}")
-        return {
-            'num_verdicts': 0,
-            'num_wrong': 0,
-            'num_time_limit': 0,
-            'num_memory_limit': 0,
-            'num_runtime_error': 0,
-            'error_ratio': 0
+            'has_error': has_error,
+            'num_total_errors': total_errors,
+            'num_wrong': num_wrong,
+            'num_time_limit': num_tle,
+            'num_memory_limit': num_mle,
+            'num_runtime_error': num_rte,
+            'has_compile_error': has_compile_error,
+            'has_other_error': 1 if other_errors > 0 else 0
         }
 
+    except Exception as e:
+        print(f"Lỗi: {e}")
+        return {
+            'has_error': 0,
+            'num_total_errors': 0,
+            'num_wrong': 0,
+            'num_time_limit': 0,
+            'num_memory_limit': 0,
+            'num_runtime_error': 0,
+            'has_compile_error': 0,
+            'has_other_error': 0
+        }
+        
+        
 # Áp dụng hàm extract_verdicts vào cột judgement
 if 'judgement' in df.columns:
     print("Đang xử lý judgement...")
@@ -159,7 +172,9 @@ if 'judgement' in df.columns:
     judgement_df = pd.DataFrame(judgement_features.tolist())
     
     # Xóa các cột cũ nếu đã tồn tại
-    columns_to_drop = ['num_verdicts', 'num_wrong', 'num_time_limit', 'num_memory_limit', 'num_runtime_error', 'error_ratio']
+    columns_to_drop = ['has_error', 'num_total_errors', 'num_wrong',
+                       'num_time_limit', 'num_memory_limit', 'num_runtime_error',
+                       'has_compile_error', 'has_other_error']
     df = df.drop(columns=columns_to_drop, errors='ignore')
     
     # Kết hợp với DataFrame gốc
@@ -170,12 +185,14 @@ if 'judgement' in df.columns:
 else:
     print("⚠️ Không tìm thấy cột 'judgement'")
     # Tạo các cột mặc định
-    df['num_verdicts'] = 0
+    df['has_error'] = 0
+    df['num_total_errors'] = 0
     df['num_wrong'] = 0
     df['num_time_limit'] = 0
     df['num_memory_limit'] = 0
     df['num_runtime_error'] = 0
-    df['error_ratio'] = 0
+    df['has_compile_error'] = 0
+    df['has_other_error'] = 0
     
 # Combine features
 # Tổng hợp theo sinh viên với error handling
@@ -189,70 +206,62 @@ try:
         print(f"❌ Thiếu các cột: {missing_cols}")
         exit(1)
     
-    agg_dict = {
-        'assignment_id': 'count',  # Số lượng bài tập đã làm
-        'pre_score': ['mean', 'max'],  # Điểm trung bình và cao nhất
-        'num_verdicts': 'mean',  # Số lần nộp bài trung bình
-        'num_wrong': 'mean',  # Số lần sai trung bình
-        'num_time_limit': 'mean',  # Số lần vượt thời gian trung bình
-        'num_memory_limit': 'mean',  # Số lần vượt bộ nhớ trung bình
-        'num_runtime_error': 'mean',  # Số lần lỗi runtime trung bình
-        'error_ratio': 'mean',  # Tỷ lệ lỗi trung bình
-        'is_final': 'sum'  # Số lượng bài làm đúng
-    }
+    # Tổng số bài duy nhất đã làm
+    num_assignments = df.groupby('username')['assignment_id'].nunique().rename('num_assignments')
     
-    # Thêm created_at nếu có
+    # Tổng số lượt nộp
+    total_submissions = df.groupby('username').size().rename('total_submissions')
+    
+     # Số bài có ít nhất 1 lần đúng
+    correct_df = df[df['is_final'] == 1].groupby('username')['assignment_id'].nunique().rename('num_correct')
+    
+    # Điểm trung bình và cao nhất
+    score_stats = df.groupby('username')['pre_score'].agg(['mean', 'max']).rename(columns={
+        'mean': 'avg_score',
+        'max': 'max_score'
+    })
+    
+    # Tổng các loại lỗi
+    error_cols = ['num_wrong', 'num_time_limit', 'num_memory_limit', 'num_runtime_error',
+                  'has_compile_error', 'has_other_error']
+    error_agg = df.groupby('username')[error_cols].sum()
+
+    # Ngày nộp đầu tiên và cuối cùng (nếu có)
     if 'created_at' in df.columns and not df['created_at'].isna().all():
-        agg_dict['created_at'] = ['min', 'max']
-    
-    student_features = df.groupby("username").agg(agg_dict).reset_index()
-    
-    # Flatten column names
-    new_columns = ['username']
-    for col in student_features.columns[1:]:
-        if isinstance(col, tuple):
-            new_columns.append(f"{col[0]}_{col[1]}")
-        else:
-            new_columns.append(col)
-    
-    student_features.columns = new_columns
-    
-    # Đổi tên cột cho dễ hiểu
-    rename_dict = {
-        'assignment_id_count': 'total_assignments',
-        'pre_score_mean': 'avg_score',
-        'pre_score_max': 'max_score',
-        'num_verdicts_mean': 'avg_submissions',
-        'num_wrong_mean': 'avg_wrong_attempts',
-        'num_time_limit_mean': 'avg_time_limit_errors',
-        'num_memory_limit_mean': 'avg_memory_limit_errors',
-        'num_runtime_error_mean': 'avg_runtime_errors',
-        'error_ratio_mean': 'avg_error_ratio',
-        'is_final_sum': 'total_correct'
-    }
-    
-    # Thêm datetime columns nếu có
-    if 'created_at_min' in student_features.columns:
-        rename_dict.update({
-            'created_at_min': 'first_submission',
-            'created_at_max': 'last_submission'
+        time_stats = df.groupby('username')['created_at'].agg(['min', 'max']).rename(columns={
+            'min': 'first_submission',
+            'max': 'last_submission'
         })
-    
-    student_features = student_features.rename(columns=rename_dict)
-    
-    # Tạo các features bổ sung
-    student_features['correct_ratio'] = student_features['total_correct'] / student_features['total_assignments']
-    
-    # Xử lý thời gian nếu có
+    else:
+        time_stats = pd.DataFrame()
+
+    # Gộp tất cả lại
+    student_features = pd.concat([
+        num_assignments,
+        total_submissions,
+        correct_df,
+        score_stats,
+        error_agg,
+        time_stats
+    ], axis=1).fillna(0)
+
+    # Thêm đặc trưng tỷ lệ đúng
+    student_features['correct_ratio'] = student_features['num_correct'] / student_features['num_assignments']
+    student_features['correct_ratio'] = student_features['correct_ratio'].fillna(0)
+
+    # Thêm đặc trưng số ngày và tốc độ nộp bài (nếu có thời gian)
     if 'first_submission' in student_features.columns and 'last_submission' in student_features.columns:
         student_features['total_days'] = (student_features['last_submission'] - student_features['first_submission']).dt.days
-        student_features['total_days'] = student_features['total_days'].fillna(1)
-        student_features['submission_rate'] = student_features['total_assignments'] / student_features['total_days'].replace(0, 1)
-    
-    print(f"✅ Tổng hợp xong. Shape: {student_features.shape}")
-    
+        student_features['total_days'] = student_features['total_days'].replace(0, 1).fillna(1)
+        student_features['submission_rate'] = student_features['total_submissions'] / student_features['total_days']
+
+    # Reset index
+    student_features = student_features.reset_index()
+
+    print(f"✅ Đã tổng hợp xong. Shape: {student_features.shape}")
+
 except Exception as e:
-    print(f"❌ Lỗi trong quá trình tổng hợp: {e}")
+    print(f"❌ Lỗi khi tổng hợp: {e}")
     exit(1)
 
 # Label ground truth
@@ -307,6 +316,8 @@ try:
 except Exception as e:
     print(f"❌ Lỗi trong quá trình chuẩn bị dữ liệu: {e}")
     exit(1)
+    
+from sklearn.model_selection import train_test_split
 # Chia train/validation split
 try:
     print("Đang chia dữ liệu train/validation...")
@@ -327,16 +338,30 @@ except Exception as e:
     # Fallback: sử dụng toàn bộ dữ liệu cho training
     X_train_split, X_val_split = X_train, None
     y_train_split, y_val_split = y_train, None
-    
+X_train_split.to_csv("./data/X_train_split.csv", index=False)
+
 # Train model and predict
 # Training model
 try:
     print("Đang training model...")
     
-    # Import và train LightGBM
-    from lightgbm import LGBMRegressor
-    from sklearn.metrics import mean_squared_error, mean_absolute_error
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+    # from sklearn.linear_model import LinearRegression
+
+    # model = LinearRegression()
+    # model.fit(X_train_split, y_train_split)
     
+    # Import và train Random Forest
+
+    # model = RandomForestRegressor(
+    #     n_estimators=300,
+    #     random_state=42,
+    #     n_jobs=-1
+    # )
+    # model.fit(X_train_split, y_train_split)
+    
+    from lightgbm import LGBMRegressor
     model = LGBMRegressor(
         n_estimators=300, 
         learning_rate=0.01, 
@@ -344,7 +369,6 @@ try:
         verbose=-1,  # Tắt log
         early_stopping_rounds=50 if X_val_split is not None else None
     )
-    
     # Fit với validation set nếu có
     if X_val_split is not None:
         model.fit(
@@ -356,7 +380,7 @@ try:
         model.fit(X_train_split, y_train_split)
         
     print("✅ Training hoàn thành")
-    
+        
 # Đánh giá trên tập training
     train_preds = model.predict(X_train_split)
     train_r2 = r2_score(y_train_split, train_preds)
